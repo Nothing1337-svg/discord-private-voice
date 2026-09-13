@@ -69,6 +69,7 @@ discord-private-voice-bot/
 - **Send Messages**: отправлять панель управления и ответы setup-команд.
 - **Embed Links**: отправлять красивую embed-панель и `/voice info`.
 - **Connect**: корректно работать с голосовыми каналами и проверками доступа.
+- **Speak**: иметь полноценный голосовой доступ в Create Room и временных комнатах.
 - **Move Members**: переносить пользователя из `➕ Создать приват`, отключать rejected/kicked пользователей.
 - **Mute Members**: выполнять `Mute` / `Unmute`.
 - **Deafen Members**: выполнять `Deafen` / `Undeafen`.
@@ -77,6 +78,29 @@ discord-private-voice-bot/
 
 Позиция роли бота должна быть выше ролей пользователей, которыми он управляет.
 
+## Роль Verified
+
+`/voice-admin setup` ищет роль с названием `Verified`.
+
+Если роль найдена, бот настраивает `Private Voice` и `➕ Создать приват` так:
+
+- `@everyone`: `View Channel = False`, `Connect = False`;
+- `Verified`: `View Channel = True`, `Connect = True`, `Speak = True`;
+- бот: права на просмотр, подключение, управление каналами и перемещение участников.
+
+Если роли `Verified` нет, бот использует `@everyone` как публичную роль и пишет предупреждение в ответе setup-команды.
+
+В приватных комнатах роль `Verified` получает матрицу прав по состояниям:
+
+- **Open + Visible**: `View Channel = True`, `Connect = True`, `Speak = True`.
+- **Closed + Visible**: `View Channel = True`, `Connect = False`, `Speak = True`.
+- **Open + Hidden**: `View Channel = False`, `Connect = True`, `Speak = True`.
+- **Closed + Hidden**: `View Channel = False`, `Connect = False`, `Speak = True`.
+
+`Close/Lock` управляет только `Connect`. `Hide/Show` управляет только `View Channel`. `Speak` не используется для ограничения входа.
+
+Владелец и Allow List всегда получают `View Channel = True`, `Connect = True`, `Speak = True`. Block List получает персональный `Connect = False`.
+
 ## Invite URL
 
 1. В Developer Portal откройте приложение.
@@ -84,7 +108,7 @@ discord-private-voice-bot/
 3. Замените `CLIENT_ID` в ссылке:
 
 ```text
-https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=30428176&integration_type=0&scope=bot+applications.commands
+https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=32525328&integration_type=0&scope=bot+applications.commands
 ```
 
 Можно также собрать ссылку через **OAuth2 → URL Generator**:
@@ -232,6 +256,7 @@ python bot.py
 
 ```bash
 python -m compileall .
+python -m unittest discover -s tests
 python -c "import discord, aiosqlite, dotenv; print(discord.__version__)"
 python -c "from views.voice_panel import VoicePanelView; v=VoicePanelView(); print(v.is_persistent(), len(v.children))"
 ```

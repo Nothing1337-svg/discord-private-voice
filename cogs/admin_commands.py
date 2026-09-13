@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.helpers import cleanup_guild_rooms, send_interaction_error
+from utils.helpers import cleanup_guild_rooms, ensure_create_room_permissions, get_verified_role, send_interaction_error
 from utils.permissions import ensure_manage_guild, require_bot_permissions
 from views.voice_panel import send_control_panel
 
@@ -49,14 +49,20 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
             if not isinstance(control, discord.TextChannel):
                 control = await guild.create_text_channel("🔊・voice-control", category=category, reason="Private voice setup")
 
+            await ensure_create_room_permissions(guild, category, creator)
             message = await send_control_panel(control)
             await self.bot.db.upsert_guild_settings(guild.id, category.id, creator.id, control.id, message.id)
+
+            verified_note = ""
+            if get_verified_role(guild) is None:
+                verified_note = "\n⚠️ Роль `Verified` не найдена, поэтому доступ выдан `@everyone`."
 
             await interaction.followup.send(
                 "✅ Setup готов.\n"
                 f"Категория: {category.mention}\n"
                 f"Join-to-create: {creator.mention}\n"
-                f"Панель: {control.mention}",
+                f"Панель: {control.mention}"
+                f"{verified_note}",
                 ephemeral=True,
             )
             LOGGER.info("Voice setup completed in guild %s", guild.id)
