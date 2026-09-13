@@ -21,11 +21,47 @@ DEFAULT_ROOM_BITRATE = 64000
 MIN_BITRATE = 8000
 RENAME_COOLDOWN_SECONDS = 60.0
 ACTION_COOLDOWN_SECONDS = 1.5
+TEMP_MESSAGE_DELETE_SECONDS = 5.0
+ERROR_MESSAGE_DELETE_SECONDS = 9.0
 
 
 def room_name_for(member: discord.Member) -> str:
     base = f"Комната • {member.display_name}".strip()
     return base[:100] or f"Комната • {member.display_name}"[:100]
+
+
+def delete_after_for(*, ephemeral: bool, is_error: bool = False) -> float | None:
+    if ephemeral:
+        return None
+    return ERROR_MESSAGE_DELETE_SECONDS if is_error else TEMP_MESSAGE_DELETE_SECONDS
+
+
+def safe_delete_message_later(message: discord.Message, delay: float) -> None:
+    async def delete_later() -> None:
+        await asyncio.sleep(delay)
+        try:
+            await message.delete()
+        except discord.NotFound:
+            return
+        except discord.Forbidden:
+            LOGGER.debug("Missing permissions to auto-delete temporary message %s", message.id)
+        except discord.HTTPException as exc:
+            LOGGER.debug("Failed to auto-delete temporary message %s: %s", message.id, exc)
+
+    asyncio.create_task(delete_later())
+
+
+async def send_temporary_channel_message(
+    channel: discord.abc.Messageable,
+    content: str | None = None,
+    *,
+    embed: discord.Embed | None = None,
+    view: discord.ui.View | None = None,
+    is_error: bool = False,
+) -> discord.Message:
+    message = await channel.send(content, embed=embed, view=view)
+    safe_delete_message_later(message, ERROR_MESSAGE_DELETE_SECONDS if is_error else TEMP_MESSAGE_DELETE_SECONDS)
+    return message
 
 
 def get_verified_role(guild: discord.Guild, verified_role_id: int) -> discord.Role:
@@ -229,20 +265,44 @@ def privacy_mode(locked: bool, hidden: bool) -> str:
     return "open"
 
 
-async def send_interaction_error(interaction: discord.Interaction, message: str) -> None:
+async def send_interaction_message(
+    interaction: discord.Interaction,
+    content: str | None = None,
+    *,
+    embed: discord.Embed | None = None,
+    view: discord.ui.View | None = None,
+    ephemeral: bool = True,
+    is_error: bool = False,
+) -> None:
+    delete_after = delete_after_for(ephemeral=ephemeral, is_error=is_error)
+    if interaction.response.is_done():
+        sent = await interaction.followup.send(
+            content,
+            embed=embed,
+            view=view,
+            ephemeral=ephemeral,
+            wait=not ephemeral,
+        )
+        if sent is not None and delete_after is not None:
+            safe_delete_message_later(sent, delete_after)
+    else:
+        await interaction.response.send_message(
+            content,
+            embed=embed,
+            view=view,
+            ephemeral=ephemeral,
+            delete_after=delete_after,
+        )
+
+
+async def send_interaction_error(interaction: discord.Interaction, message: str, *, ephemeral: bool = True) -> None:
     content = f"⚠️ {message}"
-    if interaction.response.is_done():
-        await interaction.followup.send(content, ephemeral=True)
-    else:
-        await interaction.response.send_message(content, ephemeral=True)
+    await send_interaction_message(interaction, content, ephemeral=ephemeral, is_error=True)
 
 
-async def send_interaction_success(interaction: discord.Interaction, message: str) -> None:
+async def send_interaction_success(interaction: discord.Interaction, message: str, *, ephemeral: bool = True) -> None:
     content = f"✅ {message}"
-    if interaction.response.is_done():
-        await interaction.followup.send(content, ephemeral=True)
-    else:
-        await interaction.response.send_message(content, ephemeral=True)
+    await send_interaction_message(interaction, content, ephemeral=ephemeral)
 
 
 def build_panel_embed() -> discord.Embed:

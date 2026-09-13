@@ -6,7 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.helpers import cleanup_guild_rooms, ensure_create_room_permissions, send_interaction_error
+from utils.helpers import cleanup_guild_rooms, ensure_create_room_permissions, send_interaction_error, send_interaction_message
 from utils.permissions import ensure_manage_guild, require_bot_permissions
 from views.voice_panel import send_control_panel
 
@@ -64,7 +64,8 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
             message = await send_control_panel(control)
             await self.bot.db.upsert_guild_settings(guild.id, category.id, creator.id, control.id, message.id)
 
-            await interaction.followup.send(
+            await send_interaction_message(
+                interaction,
                 "✅ Setup готов.\n"
                 f"Категория: {category.mention}\n"
                 f"Join-to-create: {creator.mention}\n"
@@ -75,10 +76,7 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
         except (discord.Forbidden, discord.HTTPException, Exception) as exc:
             LOGGER.exception("Voice setup failed")
             message = getattr(exc, "message", "Не удалось выполнить setup. Проверьте права бота и позицию роли.")
-            if interaction.response.is_done():
-                await interaction.followup.send(f"⚠️ {message}", ephemeral=True)
-            else:
-                await send_interaction_error(interaction, message)
+            await send_interaction_error(interaction, message)
 
     @app_commands.command(name="reset", description="Удалить настройки и временные комнаты бота")
     @app_commands.default_permissions(manage_guild=True)
@@ -113,7 +111,8 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
 
         await self.bot.db.delete_voice_channels_for_guild(guild.id)
         await self.bot.db.delete_guild_settings(guild.id)
-        await interaction.followup.send(
+        await send_interaction_message(
+            interaction,
             "✅ Reset выполнен.\n"
             f"Удалено временных комнат: {deleted_rooms}\n"
             f"Удалено битых записей: {stale}\n"
@@ -132,7 +131,7 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
 
         settings = await self.bot.db.get_guild_settings(guild.id)
         if settings is None:
-            await interaction.response.send_message("Настройка ещё не выполнена. Запустите `/voice-admin setup`.", ephemeral=True)
+            await send_interaction_message(interaction, "Настройка ещё не выполнена. Запустите `/voice-admin setup`.", ephemeral=True)
             return
 
         category = guild.get_channel(settings.category_id)
@@ -146,7 +145,7 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
         embed.add_field(name="Панель", value=control.mention if control else f"`{settings.control_channel_id}` missing", inline=False)
         embed.add_field(name="Panel message ID", value=str(settings.panel_message_id or "не сохранён"), inline=True)
         embed.add_field(name="Активные комнаты", value=str(len(rooms)), inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_interaction_message(interaction, embed=embed, ephemeral=True)
 
     @app_commands.command(name="cleanup", description="Удалить заброшенные временные комнаты и битые записи")
     @app_commands.default_permissions(manage_guild=True)
@@ -159,7 +158,8 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             deleted_rooms, stale_records = await cleanup_guild_rooms(self.bot, guild)
-            await interaction.followup.send(
+            await send_interaction_message(
+                interaction,
                 "✅ Cleanup выполнен.\n"
                 f"Удалено пустых временных комнат: {deleted_rooms}\n"
                 f"Удалено битых записей: {stale_records}",
@@ -167,7 +167,7 @@ class VoiceAdminCommands(commands.GroupCog, name="voice-admin"):
             )
         except (discord.Forbidden, discord.HTTPException) as exc:
             LOGGER.exception("Voice cleanup failed")
-            await interaction.followup.send(f"⚠️ {getattr(exc, 'message', 'Discord отклонил cleanup.')}", ephemeral=True)
+            await send_interaction_error(interaction, getattr(exc, "message", "Discord отклонил cleanup."))
 
 
 async def setup(bot: commands.Bot) -> None:

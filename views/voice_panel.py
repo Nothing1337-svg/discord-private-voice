@@ -10,6 +10,7 @@ from utils.helpers import (
     claim_room,
     delete_room,
     send_interaction_error,
+    send_interaction_message,
     send_interaction_success,
     set_hidden,
     set_locked,
@@ -68,7 +69,7 @@ class VoicePanelView(discord.ui.View):
             return
         try:
             check_action_cooldown(interaction.client, interaction.user.id, "select")
-            await interaction.response.send_message(content, view=view, ephemeral=True)
+            await send_interaction_message(interaction, content, view=view, ephemeral=True)
         except VoiceControlError as exc:
             await send_interaction_error(interaction, exc.message)
 
@@ -138,7 +139,8 @@ class VoicePanelView(discord.ui.View):
 
     @discord.ui.button(label="Удалить", emoji="🗑", style=discord.ButtonStyle.danger, row=4, custom_id="pv:delete")
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.send_message(
+        await send_interaction_message(
+            interaction,
             "Вы уверены, что хотите удалить комнату?",
             view=ConfirmDeleteView(),
             ephemeral=True,

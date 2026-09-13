@@ -16,6 +16,7 @@ from utils.helpers import (
     reject_user,
     rename_room,
     send_interaction_error,
+    send_interaction_message,
     send_interaction_success,
     set_bitrate,
     set_hidden,
@@ -91,7 +92,8 @@ class VoiceCommands(commands.GroupCog, name="voice"):
 
     @app_commands.command(name="delete", description="Удалить вашу приватную комнату")
     async def delete(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
+        await send_interaction_message(
+            interaction,
             "Вы уверены, что хотите удалить комнату?",
             view=ConfirmDeleteView(),
             ephemeral=True,
@@ -104,7 +106,7 @@ class VoiceCommands(commands.GroupCog, name="voice"):
             return
         try:
             room, channel = await get_member_room(self.bot, interaction.user)
-            await interaction.response.send_message(embed=build_room_info_embed(interaction.guild, room, channel), ephemeral=True)
+            await send_interaction_message(interaction, embed=build_room_info_embed(interaction.guild, room, channel), ephemeral=True)
         except (VoiceControlError, discord.Forbidden, discord.HTTPException) as exc:
             LOGGER.exception("Voice info failed")
             await send_interaction_error(interaction, getattr(exc, "message", "Не удалось показать информацию."))
