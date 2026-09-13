@@ -23,8 +23,8 @@ RENAME_COOLDOWN_SECONDS = 60.0
 ACTION_COOLDOWN_SECONDS = 1.5
 
 
-def room_name_for(member: discord.Member, preferred_name: str | None = None) -> str:
-    base = (preferred_name or f"Комната • {member.display_name}").strip()
+def room_name_for(member: discord.Member) -> str:
+    base = f"Комната • {member.display_name}".strip()
     return base[:100] or f"Комната • {member.display_name}"[:100]
 
 
@@ -358,7 +358,6 @@ async def rename_room(bot: "PrivateVoiceBot", member: discord.Member, name: str,
         raise VoiceControlError("Название не может быть пустым.")
     async with get_room_lock(bot, channel.id):
         await channel.edit(name=clean_name, reason=f"Private voice rename by {member}")
-        await bot.db.upsert_user_preferences(member.guild.id, member.id, preferred_name=clean_name)
     LOGGER.info("%s renamed room %s to %r", member, channel.id, clean_name)
     return f"Комната переименована в `{clean_name}`."
 
@@ -506,6 +505,7 @@ async def delete_room(bot: "PrivateVoiceBot", owner: discord.Member) -> str:
     async with get_room_lock(bot, channel.id):
         await channel.delete(reason=f"Private voice deleted by owner {owner}")
         await bot.db.delete_voice_channel(channel.id)
+        await bot.db.clear_user_preferred_name(room.guild_id, room.owner_id)
     LOGGER.info("%s deleted room %s", owner, channel.id)
     return "Комната удалена."
 
@@ -517,6 +517,7 @@ async def delete_room_by_channel(bot: "PrivateVoiceBot", channel: discord.VoiceC
             return
         await channel.delete(reason=reason)
         await bot.db.delete_voice_channel(channel.id)
+        await bot.db.clear_user_preferred_name(room.guild_id, room.owner_id)
     LOGGER.info("Deleted temporary room %s: %s", channel.id, reason)
 
 
@@ -574,7 +575,7 @@ async def create_private_room(bot: "PrivateVoiceBot", member: discord.Member) ->
         verified_role = get_verified_role(member.guild, bot.config.verified_role_id)
 
         channel = await category.create_voice_channel(
-            name=room_name_for(member, prefs.preferred_name),
+            name=room_name_for(member),
             overwrites=build_private_room_overwrites(
                 member.guild,
                 verified_role,

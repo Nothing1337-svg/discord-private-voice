@@ -333,6 +333,17 @@ class Database:
         )
         await self.conn.commit()
 
+    async def clear_user_preferred_name(self, guild_id: int, user_id: int) -> None:
+        await self.conn.execute(
+            """
+            UPDATE user_preferences
+            SET preferred_name = NULL
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (guild_id, user_id),
+        )
+        await self.conn.commit()
+
     async def set_preference_permission(
         self,
         guild_id: int,
@@ -340,14 +351,12 @@ class Database:
         target_user_id: int,
         permission_type: str,
     ) -> None:
-        prefs = await self.get_user_preferences(guild_id, owner_id)
-        await self.upsert_user_preferences(
-            guild_id,
-            owner_id,
-            preferred_name=prefs.preferred_name,
-            user_limit=prefs.user_limit,
-            bitrate=prefs.bitrate,
-            privacy_mode=prefs.privacy_mode,
+        await self.conn.execute(
+            """
+            INSERT OR IGNORE INTO user_preferences (guild_id, user_id)
+            VALUES (?, ?)
+            """,
+            (guild_id, owner_id),
         )
         opposite = "block" if permission_type == "allow" else "allow"
         await self.conn.execute(
