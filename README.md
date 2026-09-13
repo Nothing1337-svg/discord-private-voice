@@ -70,6 +70,8 @@ discord-private-voice-bot/
 - **Embed Links**: отправлять красивую embed-панель и `/voice info`.
 - **Connect**: корректно работать с голосовыми каналами и проверками доступа.
 - **Speak**: иметь полноценный голосовой доступ в Create Room и временных комнатах.
+- **Use Voice Activity**: разрешать обычную активацию голосом без принудительного Push-to-Talk.
+- **Video / Stream**: разрешать камеру и демонстрацию экрана в приватных комнатах.
 - **Move Members**: переносить пользователя из `➕ Создать приват`, отключать rejected/kicked пользователей.
 - **Mute Members**: выполнять `Mute` / `Unmute`.
 - **Deafen Members**: выполнять `Deafen` / `Undeafen`.
@@ -80,26 +82,32 @@ discord-private-voice-bot/
 
 ## Роль Verified
 
-`/voice-admin setup` ищет роль с названием `Verified`.
+Бот не ищет роль по названию. Укажите точный ID роли в `.env`:
 
-Если роль найдена, бот настраивает `Private Voice` и `➕ Создать приват` так:
+```env
+VERIFIED_ROLE_ID=123456789012345678
+```
+
+Чтобы скопировать ID роли, включите **User Settings → Advanced → Developer Mode**, затем откройте настройки сервера, найдите роль и выберите **Copy Role ID**.
+
+Если роль с указанным ID не найдена, бот запишет понятную ошибку в лог и не применит permissions к случайной роли.
+
+`/voice-admin setup` настраивает `Private Voice` и `➕ Создать приват` так:
 
 - `@everyone`: `View Channel = False`, `Connect = False`;
-- `Verified`: `View Channel = True`, `Connect = True`, `Speak = True`;
+- роль из `VERIFIED_ROLE_ID`: `View Channel = True`, `Connect = True`, `Speak = True`, `Use Voice Activity = True`, `Video / Stream = True`;
 - бот: права на просмотр, подключение, управление каналами и перемещение участников.
 
-Если роли `Verified` нет, бот использует `@everyone` как публичную роль и пишет предупреждение в ответе setup-команды.
+В приватных комнатах роль из `VERIFIED_ROLE_ID` получает матрицу прав по состояниям:
 
-В приватных комнатах роль `Verified` получает матрицу прав по состояниям:
+- **Open + Visible**: `View Channel = True`, `Connect = True`, `Speak = True`, `Use Voice Activity = True`, `Video / Stream = True`.
+- **Closed + Visible**: `View Channel = True`, `Connect = False`, `Speak = True`, `Use Voice Activity = True`, `Video / Stream = True`.
+- **Open + Hidden**: `View Channel = False`, `Connect = True`, `Speak = True`, `Use Voice Activity = True`, `Video / Stream = True`.
+- **Closed + Hidden**: `View Channel = False`, `Connect = False`, `Speak = True`, `Use Voice Activity = True`, `Video / Stream = True`.
 
-- **Open + Visible**: `View Channel = True`, `Connect = True`, `Speak = True`.
-- **Closed + Visible**: `View Channel = True`, `Connect = False`, `Speak = True`.
-- **Open + Hidden**: `View Channel = False`, `Connect = True`, `Speak = True`.
-- **Closed + Hidden**: `View Channel = False`, `Connect = False`, `Speak = True`.
+`Close/Lock` управляет только `Connect`. `Hide/Show` управляет только `View Channel`. `Speak`, `Use Voice Activity` и `Video / Stream` не используются для ограничения входа.
 
-`Close/Lock` управляет только `Connect`. `Hide/Show` управляет только `View Channel`. `Speak` не используется для ограничения входа.
-
-Владелец и Allow List всегда получают `View Channel = True`, `Connect = True`, `Speak = True`. Block List получает персональный `Connect = False`.
+Владелец и Allow List всегда получают `View Channel = True`, `Connect = True`, `Speak = True`, `Use Voice Activity = True`, `Video / Stream = True`. Block List получает персональный `Connect = False` только в конкретной приватной комнате.
 
 ## Invite URL
 
@@ -108,7 +116,7 @@ discord-private-voice-bot/
 3. Замените `CLIENT_ID` в ссылке:
 
 ```text
-https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=32525328&integration_type=0&scope=bot+applications.commands
+https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=66080272&integration_type=0&scope=bot+applications.commands
 ```
 
 Можно также собрать ссылку через **OAuth2 → URL Generator**:
@@ -146,6 +154,7 @@ cp .env.example .env
 
 ```env
 DISCORD_TOKEN=ваш_токен_бота
+VERIFIED_ROLE_ID=123456789012345678
 DATABASE_PATH=private_voice.sqlite3
 LOG_LEVEL=INFO
 SYNC_COMMANDS=true

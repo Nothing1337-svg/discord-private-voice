@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from database.models import VoiceChannelRecord
-from utils.permissions import VoiceControlError, require_bot_permissions
+from utils.permissions import VoiceControlError, require_bot_can_manage_member, require_bot_permissions
 
 
 if TYPE_CHECKING:
@@ -21,7 +21,6 @@ DEFAULT_ROOM_BITRATE = 64000
 MIN_BITRATE = 8000
 RENAME_COOLDOWN_SECONDS = 60.0
 ACTION_COOLDOWN_SECONDS = 1.5
-VERIFIED_ROLE_NAME = "Verified"
 
 
 def room_name_for(member: discord.Member, preferred_name: str | None = None) -> str:
@@ -29,12 +28,20 @@ def room_name_for(member: discord.Member, preferred_name: str | None = None) -> 
     return base[:100] or f"Комната • {member.display_name}"[:100]
 
 
-def get_verified_role(guild: discord.Guild) -> discord.Role | None:
-    return discord.utils.find(lambda role: role.name.lower() == VERIFIED_ROLE_NAME.lower(), guild.roles)
-
-
-def get_public_voice_target(guild: discord.Guild) -> discord.Role:
-    return get_verified_role(guild) or guild.default_role
+def get_verified_role(guild: discord.Guild, verified_role_id: int) -> discord.Role:
+    role = guild.get_role(verified_role_id)
+    if role is None:
+        LOGGER.error(
+            "Configured VERIFIED_ROLE_ID=%s was not found in guild %s (%s)",
+            verified_role_id,
+            guild.id,
+            guild.name,
+        )
+        raise VoiceControlError(
+            f"Роль Verified с ID `{verified_role_id}` не найдена на сервере. "
+            "Проверьте VERIFIED_ROLE_ID в .env и перезапустите бота."
+        )
+    return role
 
 
 def make_private_everyone_overwrite() -> discord.PermissionOverwrite:
@@ -42,11 +49,23 @@ def make_private_everyone_overwrite() -> discord.PermissionOverwrite:
 
 
 def make_public_room_overwrite(*, locked: bool, hidden: bool) -> discord.PermissionOverwrite:
-    return discord.PermissionOverwrite(view_channel=not hidden, connect=not locked, speak=True)
+    return discord.PermissionOverwrite(
+        view_channel=not hidden,
+        connect=not locked,
+        speak=True,
+        use_voice_activation=True,
+        stream=True,
+    )
 
 
 def make_privileged_room_overwrite() -> discord.PermissionOverwrite:
-    return discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
+    return discord.PermissionOverwrite(
+        view_channel=True,
+        connect=True,
+        speak=True,
+        use_voice_activation=True,
+        stream=True,
+    )
 
 
 def make_blocked_room_overwrite() -> discord.PermissionOverwrite:
@@ -58,6 +77,8 @@ def make_bot_room_overwrite() -> discord.PermissionOverwrite:
         view_channel=True,
         connect=True,
         speak=True,
+        use_voice_activation=True,
+        stream=True,
         manage_channels=True,
         move_members=True,
         mute_members=True,
@@ -67,6 +88,7 @@ def make_bot_room_overwrite() -> discord.PermissionOverwrite:
 
 def build_private_room_overwrites(
     guild: discord.Guild,
+    verified_role: discord.Role,
     owner: discord.Member,
     *,
     locked: bool,
@@ -74,10 +96,9 @@ def build_private_room_overwrites(
     allowed_members: list[discord.Member] | None = None,
     blocked_members: list[discord.Member] | None = None,
 ) -> dict[discord.abc.Snowflake, discord.PermissionOverwrite]:
-    public_target = get_public_voice_target(guild)
     overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
         guild.default_role: make_private_everyone_overwrite(),
-        public_target: make_public_room_overwrite(locked=locked, hidden=hidden),
+        verified_role: make_public_room_overwrite(locked=locked, hidden=hidden),
         owner: make_privileged_room_overwrite(),
     }
 
@@ -106,6 +127,7 @@ async def apply_room_permission_state(
     if owner is None:
         LOGGER.warning("Cannot apply room permissions for %s: owner %s is missing", channel.id, room.owner_id)
         return
+    verified_role = get_verified_role(channel.guild, bot.config.verified_role_id)
 
     allowed_members = [
         member
@@ -121,6 +143,7 @@ async def apply_room_permission_state(
     await channel.edit(
         overwrites=build_private_room_overwrites(
             channel.guild,
+            verified_role,
             owner,
             locked=room.locked,
             hidden=room.hidden,
@@ -131,11 +154,16 @@ async def apply_room_permission_state(
     )
 
 
-async def ensure_create_room_permissions(guild: discord.Guild, category: discord.CategoryChannel, creator: discord.VoiceChannel) -> None:
-    public_target = get_public_voice_target(guild)
+async def ensure_create_room_permissions(
+    guild: discord.Guild,
+    verified_role_id: int,
+    category: discord.CategoryChannel,
+    creator: discord.VoiceChannel,
+) -> None:
+    verified_role = get_verified_role(guild, verified_role_id)
     base_overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
         guild.default_role: make_private_everyone_overwrite(),
-        public_target: make_privileged_room_overwrite(),
+        verified_role: make_privileged_room_overwrite(),
     }
     if guild.me is not None:
         base_overwrites[guild.me] = make_bot_room_overwrite()
@@ -388,6 +416,7 @@ async def reject_user(bot: "PrivateVoiceBot", owner: discord.Member, target: dis
         if latest is not None:
             await apply_room_permission_state(bot, channel, latest, reason=f"Private voice reject by {owner}")
         if target.voice and target.voice.channel and target.voice.channel.id == channel.id:
+            require_bot_can_manage_member(target)
             await target.move_to(None, reason=f"Rejected from private voice by {owner}")
     LOGGER.info("%s rejected %s from room %s", owner, target, channel.id)
     return f"{target.mention} больше не может подключаться к комнате."
@@ -439,6 +468,7 @@ async def kick_user(bot: "PrivateVoiceBot", owner: discord.Member, target: disco
         raise VoiceControlError("Нельзя выгнать владельца через его собственную панель.")
     if target not in channel.members:
         raise VoiceControlError("Этот пользователь не находится в вашей комнате.")
+    require_bot_can_manage_member(target)
     await target.move_to(None, reason=f"Kicked from private voice by {owner}")
     LOGGER.info("%s kicked %s from room %s", owner, target, channel.id)
     return f"{target.mention} отключён от комнаты."
@@ -451,6 +481,7 @@ async def set_member_mute(bot: "PrivateVoiceBot", owner: discord.Member, target:
         raise VoiceControlError("Нельзя заглушить владельца через его собственную панель.")
     if target not in channel.members:
         raise VoiceControlError("Этот пользователь не находится в вашей комнате.")
+    require_bot_can_manage_member(target)
     await target.edit(mute=muted, reason=f"Private voice {'mute' if muted else 'unmute'} by {owner}")
     LOGGER.info("%s %s %s in room %s", owner, "muted" if muted else "unmuted", target, channel.id)
     return f"{target.mention} заглушён." if muted else f"С {target.mention} снят mute."
@@ -463,6 +494,7 @@ async def set_member_deafen(bot: "PrivateVoiceBot", owner: discord.Member, targe
         raise VoiceControlError("Нельзя deafen владельца через его собственную панель.")
     if target not in channel.members:
         raise VoiceControlError("Этот пользователь не находится в вашей комнате.")
+    require_bot_can_manage_member(target)
     await target.edit(deafen=deafened, reason=f"Private voice {'deafen' if deafened else 'undeafen'} by {owner}")
     LOGGER.info("%s %s %s in room %s", owner, "deafened" if deafened else "undeafened", target, channel.id)
     return f"{target.mention} теперь не слышит комнату." if deafened else f"{target.mention} снова слышит комнату."
@@ -495,7 +527,16 @@ async def create_private_room(bot: "PrivateVoiceBot", member: discord.Member) ->
     if member.voice is None or member.voice.channel is None or member.voice.channel.id != settings.creator_channel_id:
         return
 
-    require_bot_permissions(member.guild, manage_channels=True, move_members=True)
+    require_bot_permissions(
+        member.guild,
+        manage_channels=True,
+        view_channel=True,
+        connect=True,
+        speak=True,
+        use_voice_activation=True,
+        stream=True,
+        move_members=True,
+    )
     lock = get_member_create_lock(bot, member.guild.id, member.id)
     async with lock:
         if member.voice is None or member.voice.channel is None or member.voice.channel.id != settings.creator_channel_id:
@@ -530,11 +571,13 @@ async def create_private_room(bot: "PrivateVoiceBot", member: discord.Member) ->
             for user_id in await bot.db.get_preference_permissions(member.guild.id, member.id, "block")
             if (saved_member := member.guild.get_member(user_id)) is not None
         ]
+        verified_role = get_verified_role(member.guild, bot.config.verified_role_id)
 
         channel = await category.create_voice_channel(
             name=room_name_for(member, prefs.preferred_name),
             overwrites=build_private_room_overwrites(
                 member.guild,
+                verified_role,
                 member,
                 locked=locked,
                 hidden=hidden,

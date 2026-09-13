@@ -27,6 +27,17 @@ def require_bot_permissions(guild: discord.Guild, **permissions: bool) -> None:
         )
 
 
+def require_bot_can_manage_member(target: discord.Member) -> None:
+    guild = target.guild
+    me = guild.me
+    if me is None:
+        raise VoiceControlError("Не удалось определить участника бота на сервере.")
+    if target.id == guild.owner_id:
+        raise VoiceControlError("Бот не может управлять владельцем сервера.")
+    if target.top_role >= me.top_role and guild.owner_id != me.id:
+        raise VoiceControlError("Роль выбранного участника выше или равна роли бота.")
+
+
 def ensure_manage_guild(interaction: discord.Interaction) -> bool:
     user = interaction.user
     if not isinstance(user, discord.Member):
